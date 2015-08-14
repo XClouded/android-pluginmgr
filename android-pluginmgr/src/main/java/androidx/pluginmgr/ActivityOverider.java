@@ -1,5 +1,17 @@
-/**
- * 
+/*
+ * Copyright (C) 2015 HouKx <hkx.aidream@gmail.com>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package androidx.pluginmgr;
 
@@ -8,12 +20,13 @@ import java.lang.reflect.Field;
 
 import android.app.Activity;
 import android.content.ComponentName;
-import android.content.ContextWrapper;
+import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.ActivityInfo;
-import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.ContextThemeWrapper;
 import android.view.Window;
 
 /**
@@ -27,24 +40,51 @@ public class ActivityOverider {
 	 * 自动生成的 Activity 的全类名
 	 */
 	static final String targetClassName = "androidx.pluginmgr.PluginActivity";
-
+    // ------------------- process service  ---------
 	/**
-	 * 处理 Intent 跳转
+	 * 覆盖 StarService 方法
+	 * 
+	 * @param intent
+	 * @param fromAct
+	 */
+	public static ComponentName overrideStartService(Activity fromAct,String pluginId,Intent intent) {
+		//TODO 覆盖 StarService 方法
+		Log.d(tag, "overrideStartService");
+		return fromAct.startService(intent);
+	}
+	public static boolean overrideBindService(Activity fromAct,String pluginId,Intent intent,ServiceConnection conn, int flags) {
+		//TODO overrideBindService
+		Log.d(tag, "overrideBindService");
+		return fromAct.bindService(intent, conn, flags);
+	}
+	public static void overrideUnbindService(Activity fromAct,String pluginId,ServiceConnection conn) {
+		//TODO overrideUnbindService
+		Log.d(tag, "overrideUnbindService");
+		fromAct.unbindService( conn);
+	}
+	public static boolean overrideStopService(Activity fromAct,String pluginId,Intent intent){
+		//TODO overrideStopService
+		Log.d(tag, "overrideStopService");
+		return fromAct.stopService(intent);
+	}
+	// ------------------ process Activity ---------------------------
+	/**
+	 * 处理 插件Activity 通过 intent 跳转到别的Activity
 	 * <p>
 	 * 供插件中的 startActivity 调用
 	 * 
+	 * @param fromAct
+	 *            - 发出请求的Activity
+	 * @param pluginId
+	 *            - 插件id
 	 * @param intent
 	 *            - 启动其他Activity的Intent请求
 	 * @param requestCode
 	 * @param options
-	 * @param pluginId
-	 *            - 插件id
-	 * @param fromAct
-	 *            - 发出请求的Activity
 	 * @return 修改后的 Intent
 	 */
-	public static Intent newIntent(Intent intent, int requestCode,
-			Bundle options, String pluginId, Activity fromAct) {
+	public static Intent overrideStartActivityForResult(Activity fromAct, String pluginId,Intent intent, int requestCode,
+			Bundle options) {
 		// 主要做以下工作：
 		// 1 、修改Intent的跳转目标
 		// 2 、帮助插件类加载器决定使用哪个activity类加载器
@@ -58,16 +98,24 @@ public class ActivityOverider {
 			String toActName = compname.getClassName();
 			PlugInfo thisPlugin = mgr.getPluginById(pluginId);
 			ActivityInfo actInThisApk = null;
+			PlugInfo plug = thisPlugin;
 			if (pkg != null) {
 				if (pkg.equals(thisPlugin.getPackageName())) {
 					actInThisApk = thisPlugin
 							.findActivityByClassName(toActName);
+				}else{
+					PlugInfo otherPlug = mgr.getPluginByPackageName(pkg);
+					if (otherPlug != null) {
+						plug = otherPlug;
+						actInThisApk = otherPlug
+								.findActivityByClassName(toActName);
+					}
 				}
 			} else {
 				actInThisApk = thisPlugin.findActivityByClassName(toActName);
 			}
 			if (actInThisApk != null) {
-				setPluginIntent(intent, thisPlugin, actInThisApk.name);
+				setPluginIntent(intent, plug, actInThisApk.name);
 			} else {
 				for (PlugInfo plugInfo : mgr.getPlugins()) {
 					if (plugInfo == thisPlugin) {
@@ -110,45 +158,50 @@ public class ActivityOverider {
 
 	private static void setPluginIntent(Intent intent, PlugInfo plugin,
 			String actName) {
-		String pkgName = null;
-		if (intent.getComponent() != null) {
-			pkgName = intent.getComponent().getPackageName();
-		}
 		PluginManager mgr = PluginManager.getInstance();
 		String pluginId = plugin.getId();
 		createProxyDex(plugin, actName);
 		String act = mgr.getFrameworkClassLoader().newActivityClassName(
 				pluginId, actName);
-		ComponentName compname = null;
-		if (pkgName != null) {
-			compname = new ComponentName(pkgName, act);
-		} else {
-			compname = new ComponentName(mgr.getContext(), act);
-		}
+		ComponentName compname = new ComponentName(mgr.getContext(), act);
 		intent.setComponent(compname);
 	}
-
-	static File getPorxyActivityDexPath(PlugInfo plugin, String activity) {
-		String actName = activity;
+	static File getPluginBaseDir(String pluginId) {
 		String pluginPath = PluginManager.getInstance()
 				.getDexInternalStoragePath().getAbsolutePath();
-		String pluginDir = pluginPath + '/' + plugin.getId() + ".acts/";
+		String pluginDir = pluginPath + '/' + pluginId + "-dir/";
 		File folder = new File(pluginDir);
 		folder.mkdirs();
-		File saveDir = new File(folder, actName + ".dex");
-		return saveDir;
+		return folder;
+	}
+	
+	static File getPluginLibDir(String pluginId) {
+		File folder = new File(getPluginBaseDir(pluginId)+ "/lib/");
+		return folder;
+	}
+	
+	static File getPorxyActivityDexPath(String pluginId, String activity) {
+		File folder = new File(getPluginBaseDir(pluginId)+"/activities/");
+		folder.mkdirs();
+		String suffix = ".dex";
+		if (android.os.Build.VERSION.SDK_INT < 11) {
+			suffix = ".jar";
+		}
+		File savePath = new File(folder, activity + suffix);
+		return savePath;
 	}
 
-	static void createProxyDex(PlugInfo plugin, String activity) {
-		createProxyDex(plugin, activity, true);
+	static File createProxyDex(PlugInfo plugin, String activity) {
+		return createProxyDex(plugin, activity, true);
 	}
 
-	static void createProxyDex(PlugInfo plugin, String activity, boolean lazy) {
-		File saveDir = getPorxyActivityDexPath(plugin, activity);
-		createProxyDex(plugin, activity, saveDir, lazy);
+	static File createProxyDex(PlugInfo plugin, String activity, boolean lazy) {
+		File savePath = getPorxyActivityDexPath(plugin.getId(), activity);
+		createProxyDex(plugin, activity, savePath, lazy);
+		return savePath;
 	}
 
-	static void createProxyDex(PlugInfo plugin, String activity, File saveDir,
+	private static void createProxyDex(PlugInfo plugin, String activity, File saveDir,
 			boolean lazy) {
 		// Log.d(tag + ":createProxyDex", "plugin=" + plugin + "\n, activity="
 		// + activity);
@@ -166,43 +219,65 @@ public class ActivityOverider {
 			Log.e(tag, Log.getStackTraceString(e));
 		}
 	}
-
-	/**
-	 * 按照pluginId寻找AssetManager
-	 * <p>
-	 * 供插件中的 onCreate()方法内 (super.onCreate()之前)调用 <br/>
-	 * 到了这里可以说框架已经成功创建了activity
-	 * 
-	 * @param pluginId
-	 *            -插件Id
-	 * @param fromAct
-	 *            - 发出请求的Activity
-	 * @return
-	 */
-	public static AssetManager getAssetManager(String pluginId, Activity fromAct) {
-		PlugInfo rsinfo = PluginManager.getInstance().getPluginById(pluginId);
-		// fromAct.getApplicationContext();
-		try {
-			Field f = ContextWrapper.class.getDeclaredField("mBase");
-			f.setAccessible(true);
-			f.set(fromAct, rsinfo.getApplication());
-		} catch (Exception e) {
-			Log.e(tag, Log.getStackTraceString(e));
-		}
-		// 如果是三星Galaxy S4 手机，则使用包装的LayoutInflater替换原LayoutInflater
-		// 这款手机在解析内置的布局文件时有各种错误
-		if (android.os.Build.MODEL.equals("GT-I9500")) {
-			Window window = fromAct.getWindow();// 得到 PhoneWindow 实例
+	public static Object[] overrideAttachBaseContext(final String pluginId,final Activity fromAct,Context base){
+	
+		Log.i(tag, "overrideAttachBaseContext: pluginId="+pluginId+", activity="+fromAct.getClass().getSuperclass().getName()
+				);
+		// 
+		PlugInfo plugin = PluginManager.getInstance().getPluginById(pluginId);
+		if (plugin.getApplication() == null) {
 			try {
-				ReflectionUtils.setFieldValue(window, "mLayoutInflater",
-						new LayoutInflaterWrapper(window.getLayoutInflater()));
+				PluginManager.getInstance().initPluginApplication(plugin,
+						null);
 			} catch (Exception e) {
 				Log.e(tag, Log.getStackTraceString(e));
 			}
 		}
-		return rsinfo.getAssetManager();
+		PluginActivityWrapper actWrapper = new PluginActivityWrapper(base, plugin.appWrapper, plugin);
+		return new Object[] { actWrapper, plugin.getAssetManager() };
 	}
-
+	
+	private static void changeActivityInfo(Context activity){
+		final String actName = activity.getClass().getSuperclass().getName();
+		Log.d(tag, "changeActivityInfo: activity = "+activity+", class = "+actName);
+		if(!activity.getClass().getName().equals(targetClassName)){
+			Log.w(tag, "not a Proxy Activity ,then return.");
+			return;
+		}
+		Field field_mActivityInfo=null;
+		try {
+			field_mActivityInfo = Activity.class.getDeclaredField("mActivityInfo");
+			field_mActivityInfo.setAccessible(true);
+		}  catch (Exception e) {
+			Log.e(tag, Log.getStackTraceString(e));
+			return;
+		}
+		PluginManager con = PluginManager.getInstance();
+		PlugInfo plugin = con.getPluginByPackageName(activity.getPackageName());
+		
+		ActivityInfo actInfo = plugin.findActivityByClassName(actName);
+		actInfo.applicationInfo = plugin.getPackageInfo().applicationInfo;
+		try {
+			field_mActivityInfo.set(activity, actInfo);
+		} catch (Exception e) {
+			Log.e(tag, Log.getStackTraceString(e));
+		}
+		
+		Log.i(tag, "changeActivityInfo->changeTheme: "+" theme = "+actInfo.getThemeResource()
+				+", icon = "+actInfo.getIconResource()+", logo = "+actInfo.logo);
+	}
+	
+	public static int getPlugActivityTheme(Activity fromAct,String pluginId) {
+		PluginManager con = PluginManager.getInstance();
+		PlugInfo plugin = con.getPluginById(pluginId);
+		String actName = fromAct.getClass().getSuperclass().getName();
+		ActivityInfo actInfo = plugin.findActivityByClassName(actName);
+		int rs =  actInfo.getThemeResource();
+		Log.d(tag, "getPlugActivityTheme: theme="+rs+", actName="+actName);
+		changeActivityInfo(fromAct);
+		return rs;
+	}
+	
 	/**
 	 * 按下back键的方法调用
 	 * 
@@ -210,9 +285,9 @@ public class ActivityOverider {
 	 * @param fromAct
 	 * @return 是否调用父类的onBackPressed()方法
 	 */
-	public static boolean overideOnbackPressed(String pluginId, Activity fromAct) {
+	public static boolean overrideOnbackPressed(Activity fromAct,String pluginId) {
 		PlugInfo plinfo = PluginManager.getInstance().getPluginById(pluginId);
-		String actName = fromAct.getClass().getSuperclass().getSimpleName();
+		String actName = fromAct.getClass().getSuperclass().getName();
 		ActivityInfo actInfo = plinfo.findActivityByClassName(actName);
 		boolean finish = plinfo.isFinishActivityOnbackPressed(actInfo);
 		if (finish) {
@@ -227,7 +302,55 @@ public class ActivityOverider {
 	// =================== Activity 生命周期回调方法 ==================
 	//
 	public static void callback_onCreate(String pluginId, Activity fromAct) {
+		Log.d(tag, "callback_onCreate(act="+fromAct.getClass().getSuperclass().getName()+", window="+fromAct.getWindow()
+				+ ")");
 		PluginManager con = PluginManager.getInstance();
+		PlugInfo plugin = con.getPluginById(pluginId);
+		// replace Application
+		try {
+			Field applicationField = Activity.class
+					.getDeclaredField("mApplication");
+			applicationField.setAccessible(true);
+			applicationField.set(fromAct, plugin.getApplication());
+		}  catch (Exception e) {
+			e.printStackTrace();
+		}
+		{
+
+			String actName = fromAct.getClass().getSuperclass().getName();
+			ActivityInfo actInfo = plugin.findActivityByClassName(actName);
+			int resTheme = actInfo.getThemeResource();
+			if (resTheme != 0) {
+				boolean hasNotSetTheme = true;
+				try {
+					Field mTheme = ContextThemeWrapper.class
+							.getDeclaredField("mTheme");
+					mTheme.setAccessible(true);
+					hasNotSetTheme = mTheme.get(fromAct) == null;
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+				if (hasNotSetTheme) {
+					changeActivityInfo(fromAct);
+					fromAct.setTheme(resTheme);
+				}
+			}
+		}
+		// 如果是三星Galaxy S4 手机，则使用包装的LayoutInflater替换原LayoutInflater
+		// 这款手机在解析内置的布局文件时有各种错误
+		if (android.os.Build.MODEL.equals("GT-I9500")) {
+			Window window = fromAct.getWindow();// 得到 PhoneWindow 实例
+			try {
+				Object origInf = ReflectionUtils.getFieldValue(window, "mLayoutInflater");
+				if(!(origInf instanceof LayoutInflaterWrapper)){
+					ReflectionUtils.setFieldValue(window, "mLayoutInflater",
+							new LayoutInflaterWrapper(window.getLayoutInflater()));
+				}
+			} catch (Exception e) {
+				Log.e(tag, Log.getStackTraceString(e));
+			}
+		}
+		// invoke callback
 		PluginActivityLifeCycleCallback callback = con
 				.getPluginActivityLifeCycleCallback();
 		if (callback != null) {
@@ -236,6 +359,7 @@ public class ActivityOverider {
 	}
 
 	public static void callback_onResume(String pluginId, Activity fromAct) {
+		Log.d(tag, "callback_onResume(act="+fromAct.getClass().getSuperclass().getName()+")");
 		PluginActivityLifeCycleCallback callback = PluginManager.getInstance()
 				.getPluginActivityLifeCycleCallback();
 		if (callback != null) {

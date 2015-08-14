@@ -18,106 +18,90 @@ package androidx.pluginmgr;
 import java.io.File;
 
 import android.content.Context;
-import android.content.ContextWrapper;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.content.res.Resources;
+import android.content.res.Resources.Theme;
 import android.util.Log;
+import android.view.ContextThemeWrapper;
 
 /**
- * Plugin Context 包装类
- * 
  * @author HouKangxi
  *
  */
-class PluginContextWrapper extends ContextWrapper {
+class PluginActivityWrapper extends ContextThemeWrapper {
+	private static final String tag = "PluginActivityWrapper";
 	private PlugInfo plugin;
-	private static final String tag = "PluginContextWrapper";
-	private ApplicationInfo applicationInfo;
-	private File fileDir;
-	public PluginContextWrapper(Context base, PlugInfo plugin) {
-		super(base);
+	private Context appWrapper;
+	
+	public PluginActivityWrapper(Context base, Context appWrapper,PlugInfo plugin) {
+		attachBaseContext(base);
 		this.plugin = plugin;
-		applicationInfo = new ApplicationInfo(super.getApplicationInfo());
-		applicationInfo.sourceDir = plugin.getFilePath();
-		applicationInfo.dataDir = ActivityOverider.getPluginBaseDir(
-				plugin.getId()).getAbsolutePath();
-		fileDir = new File(ActivityOverider.getPluginBaseDir(plugin.getId())
-				.getAbsolutePath() + "/files/");
+		this.appWrapper = appWrapper;
+	}
+
+	@Override
+	public Theme getTheme() {
+		Log.d(tag, "getTheme()");
+		return null;
 	}
 
 	@Override
 	public File getFilesDir() {
-		if (!fileDir.exists()) {
-			fileDir.mkdirs();
-		}
-		return fileDir;
+		return appWrapper.getFilesDir();
 	}
 
 	@Override
 	public String getPackageResourcePath() {
-		// TODO Auto-generated method stub
 		Log.d(tag, "getPackageResourcePath()");
-		return super.getPackageResourcePath();
+		return appWrapper.getPackageResourcePath();
 	}
 
 	@Override
 	public String getPackageCodePath() {
-		// TODO Auto-generated method stub
 		Log.d(tag, "getPackageCodePath()");
-		return super.getPackageCodePath();
+		return appWrapper.getPackageCodePath();
 	}
 
 	@Override
 	public File getCacheDir() {
-		// TODO Auto-generated method stub
 		Log.d(tag, "getCacheDir()");
-		return super.getCacheDir();
+		return appWrapper.getCacheDir();
 	}
 
 	@Override
 	public PackageManager getPackageManager() {
-		// TODO Auto-generated method stub
 		Log.d(tag, "PackageManager()");
-		return super.getPackageManager();
+		return appWrapper.getPackageManager();
 	}
 
 	@Override
 	public ApplicationInfo getApplicationInfo() {
-		return applicationInfo;
+		return appWrapper.getApplicationInfo();
 	}
 
 	@Override
 	public Context getApplicationContext() {
 		Log.d(tag, "getApplicationContext()");
-		return this;
+		return appWrapper.getApplicationContext();
 	}
 
 	@Override
 	public String getPackageName() {
 		Log.d(tag, "getPackageName()");
-		return plugin.getPackageName();
+		return appWrapper.getPackageName();
 	}
 
 	@Override
 	public Resources getResources() {
 		Log.d(tag, "getResources()");
-		return plugin.getResources();
+		return appWrapper.getResources();
 	}
 
 	@Override
 	public AssetManager getAssets() {
 		Log.d(tag, "getAssets()");
-		return plugin.getAssetManager();
+		return appWrapper.getAssets();
 	}
-	// @Override
-	// public Object getSystemService(String name) {
-	// if (name.equals(Context.ACTIVITY_SERVICE)) {
-	// if (plugin.getApplicationInfo().process != null) {
-	// return plugin.activityManager;
-	// }
-	// }
-	// return super.getSystemService(name);
-	// }
 }
